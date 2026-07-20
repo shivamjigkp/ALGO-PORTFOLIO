@@ -15,6 +15,8 @@ the full lookback window each time.
 
 from dataclasses import dataclass
 
+from app.engine.e2_tracker import calculate_e2, calculate_e2_zone
+from app.engine.entry_zone import calculate_entry_zone
 from app.engine.state_machine import Direction, Point, Stage, Structure
 from app.engine.swing_detector import find_confirmed_pivots, group_pivots_by_index
 from app.engine.touch_sweep import TouchMode
@@ -89,3 +91,54 @@ def to_dict(s: Structure) -> dict:
         "d": point_dict(s.d),
         "e": point_dict(s.e),
     }
+
+
+def build_structures_payload(
+    candles: list[Candle],
+    strategy: str = "both",       # "upside" | "downside" | "both"
+    swing_lookback: int = 5,
+    touch_mode: TouchMode = "wick",
+    e_target: str = "A_OR_C",
+) -> list[dict]:
+    """Single source of truth for turning a candle window into the
+    structure list the frontend renders — entry_zone and e2 included.
+
+    Used by BOTH app/api/routes_structures.py (REST) and
+    app/api/ws_live.py (WebSocket) so the two transports can never drift
+    out of sync with each other.
+    """
+    if not candles:
+        return []
+
+    # Pivots are recomputed here (same cost as inside detect_structures)
+    # rather than threaded through, since e2 needs them post-D and nothing
+    # in this codebase carries incremental state between fetch cycles
+    # (see this module's docstring above).
+    pivots_by_index = group_pivots_by_index(find_confirmed_pivots(candles, swing_lookback))
+
+    directions = ["upside", "downside"] if strategy == "both" else [strategy]
+    results: list[dict] = []
+
+    for direction in directions:
+        cfg = DetectionConfig(
+            direction=direction,
+            swing_lookback=swing_lookback,
+            touch_mode=touch_mode,
+            e_liquidity_target=e_target,
+        )
+        for s in detect_structures(candles, cfg):
+            item = to_dict(s)
+
+            entry = calculate_entry_zone(s, direction) if s.stage_name() == "ABCDE" else None
+            item["entry_zone"] = (
+                {"top": entry.top, "bottom": entry.bottom, "start_index": entry.start_index, "end_index": entry.end_index}
+                if entry else None
+            )
+
+            e2 = calculate_e2(s, pivots_by_index) if s.stage_name() == "ABCDE" else None
+            item["e2"] = {"index": e2.index, "price": e2.price} if e2 else None
+            item["e2_zone"] = calculate_e2_zone(s, e2) if e2 else None
+
+            results.append(item)
+
+    return results

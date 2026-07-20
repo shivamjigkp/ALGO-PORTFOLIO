@@ -6,8 +6,7 @@ structure detection results for a given symbol.
 from fastapi import APIRouter
 
 from app.data.cache_store import candle_cache
-from app.engine.entry_zone import calculate_entry_zone
-from app.engine.structure_manager import DetectionConfig, detect_structures, to_dict
+from app.engine.structure_manager import build_structures_payload
 
 router = APIRouter(tags=["structures"])
 
@@ -36,24 +35,12 @@ async def get_structures(
     if not candles:
         return {"symbol": symbol, "structures": []}
 
-    directions = ["upside", "downside"] if strategy == "both" else [strategy]
-    results = []
-
-    for direction in directions:
-        cfg = DetectionConfig(
-            direction=direction,
-            swing_lookback=swing_lookback,
-            touch_mode=touch_mode,
-            e_liquidity_target=e_target,
-        )
-        structures = detect_structures(candles, cfg)
-        for s in structures:
-            entry = calculate_entry_zone(s, direction) if s.stage_name() == "ABCDE" else None
-            item = to_dict(s)
-            item["entry_zone"] = (
-                {"top": entry.top, "bottom": entry.bottom, "start_index": entry.start_index, "end_index": entry.end_index}
-                if entry else None
-            )
-            results.append(item)
+    results = build_structures_payload(
+        candles,
+        strategy=strategy,
+        swing_lookback=swing_lookback,
+        touch_mode=touch_mode,
+        e_target=e_target,
+    )
 
     return {"symbol": symbol, "count": len(results), "structures": results}

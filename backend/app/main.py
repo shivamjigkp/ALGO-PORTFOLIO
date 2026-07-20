@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes_structures import router as structures_router
 from app.api.routes_symbols import router as symbols_router
+from app.api.ws_live import router as ws_router
 from app.core.config import validate_settings
 from app.data.fetcher_worker import run_fetcher_loop
 
@@ -41,6 +42,7 @@ app.add_middleware(
 
 app.include_router(symbols_router)
 app.include_router(structures_router)
+app.include_router(ws_router)
 
 
 @app.get("/health")
