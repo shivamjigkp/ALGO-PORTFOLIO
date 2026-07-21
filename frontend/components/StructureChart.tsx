@@ -34,13 +34,30 @@ function resolveVar(name: string): string {
 function cycleColorFor(structure: StructureItem): string {
   const palette = structure.direction === "upside" ? CYCLE_UP : CYCLE_DOWN;
   let hash = 0;
-  for (const ch of structure.id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const idStr = String(structure.id);
+  for (const ch of idStr) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
   return resolveVar(palette[hash % palette.length]);
 }
 
 function timeAt(candles: Candle[], index: number): UTCTimestamp | null {
   const c = candles[Math.max(0, Math.min(index, candles.length - 1))];
   return c ? (c.timestamp as UTCTimestamp) : null;
+}
+
+// lightweight-charts requires every series' data to be strictly ascending
+// by time with no duplicate timestamps, or setData() throws. Upstream data
+// (raw candles from the API, or derived structure/zone points built from
+// candle indices) can occasionally violate this — e.g. a repeated bar from
+// the data provider, or two structure points landing on the same candle.
+// Rather than chase every possible source, we guarantee the invariant right
+// here at every setData() call site: sort by time, then keep the LAST
+// point for any duplicate timestamp.
+function dedupeAscending<T extends { time: UTCTimestamp }>(points: T[]): T[] {
+  const byTime = new Map<number, T>();
+  for (const p of points) byTime.set(p.time as number, p);
+  return Array.from(byTime.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([, p]) => p);
 }
 
 // Which named points (in ABCDE order) sit on the "high" side of the swing
@@ -116,13 +133,15 @@ export default function StructureChart({
   useEffect(() => {
     if (!candleSeriesRef.current) return;
     candleSeriesRef.current.setData(
-      candles.map((c) => ({
-        time: c.timestamp as UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }))
+      dedupeAscending(
+        candles.map((c) => ({
+          time: c.timestamp as UTCTimestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }))
+      )
     );
     chartRef.current?.timeScale().fitContent();
   }, [candles]);
@@ -171,8 +190,13 @@ export default function StructureChart({
           priceLineVisible: false,
           crosshairMarkerVisible: false,
         });
-        line.setData(pathPoints);
-        overlaySeriesRef.current.push(line);
+        const deduped = dedupeAscending(pathPoints);
+        if (deduped.length >= 2) {
+          line.setData(deduped);
+          overlaySeriesRef.current.push(line);
+        } else {
+          chart.removeSeries(line);
+        }
       }
 
       if (structure.entry_zone) {
@@ -189,16 +213,19 @@ export default function StructureChart({
               priceLineVisible: false,
               crosshairMarkerVisible: false,
             });
-            bound.setData([
-              { time: t0, value: price },
-              { time: t1, value: price },
-            ]);
+            bound.setData(
+              dedupeAscending([
+                { time: t0, value: price },
+                { time: t1, value: price },
+              ])
+            );
             overlaySeriesRef.current.push(bound);
           }
         }
       }
     }
 
+    markers.sort((a, b) => (a.time as number) - (b.time as number));
     createSeriesMarkers(candleSeries, markers);
   }, [structures, candles]);
 

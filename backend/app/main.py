@@ -4,6 +4,10 @@ up the route modules from app/api/. Route logic itself lives in
 app/api/routes_symbols.py and app/api/routes_structures.py — this file
 only handles app setup, lifespan, and middleware.
 """
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 import asyncio
 import logging

@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import StructureChart from "@/components/StructureChart";
+import Sidebar from "@/components/Sidebar";
+import TickerBar from "@/components/TickerBar";
+import SignalFeed from "@/components/SignalFeed";
+import StatusBar from "@/components/StatusBar";
 import {
   addSymbol,
   getCandles,
@@ -18,7 +22,6 @@ import type {
   TouchMode,
 } from "@/lib/types";
 
-const STRATEGIES: Strategy[] = ["both", "upside", "downside"];
 const TOUCH_MODES: TouchMode[] = ["wick", "close", "both"];
 const E_TARGETS: ETarget[] = ["A_OR_C", "A", "C"];
 
@@ -37,6 +40,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
 
   const streamRef = useRef<StructureStreamHandle | null>(null);
 
@@ -47,12 +51,24 @@ export default function Home() {
     e_target: eTarget,
   };
 
-  // Load symbol list once.
+  // Load symbol list once. If the backend has no symbols tracked yet
+  // (fresh deploy, empty registry), seed one default so the dashboard is
+  // never blank on first load.
   useEffect(() => {
     getSymbols()
-      .then((res) => {
-        setSymbols(res.symbols);
-        if (res.symbols.length > 0) setSymbol(res.symbols[0]);
+      .then(async (res) => {
+        if (res.symbols.length > 0) {
+          setSymbols(res.symbols);
+          setSymbol(res.symbols[0]);
+          return;
+        }
+        try {
+          const seeded = await addSymbol("XAU/USD");
+          setSymbols(seeded.symbols);
+          if (seeded.symbols.length > 0) setSymbol(seeded.symbols[0]);
+        } catch (e) {
+          setError(String(e));
+        }
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -69,6 +85,7 @@ export default function Home() {
         if (cancelled) return;
         setCandles(candlesRes.candles);
         setStructures(structuresRes.structures);
+        setLastUpdated(candlesRes.last_updated);
       })
       .catch((e) => !cancelled && setError(String(e)))
       .finally(() => !cancelled && setLoading(false));
@@ -91,6 +108,7 @@ export default function Home() {
       query,
       (msg) => {
         setStructures(msg.structures);
+        setLastUpdated(msg.last_updated);
         getCandles(symbol)
           .then((res) => setCandles(res.candles))
           .catch(() => {});
@@ -117,126 +135,224 @@ export default function Home() {
     }
   }, [newSymbol]);
 
+  const lastClose = candles.length > 0 ? candles[candles.length - 1].close : null;
+  const prevClose = candles.length > 1 ? candles[candles.length - 2].close : null;
+  const delta = lastClose !== null && prevClose !== null ? lastClose - prevClose : null;
+  const activeStructureCount = structures.filter((s) => s.stage_display !== "CANCELLED").length;
+
   return (
-    <div className="flex flex-col flex-1 min-h-screen">
-      <header className="flex flex-wrap items-center gap-3 border-b border-border bg-panel px-4 py-3">
-        <span className="font-mono text-sm text-accent tracking-wide">QuantX</span>
+    <div className="flex flex-col min-h-screen">
+      <TickerBar symbols={symbols} activeSymbol={symbol} onSelect={setSymbol} />
 
-        <select
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value)}
-          className="rounded border border-border bg-panel-alt px-2 py-1 text-sm text-foreground"
-        >
-          {symbols.length === 0 && <option value="">No symbols</option>}
-          {symbols.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+      <div className="shell">
+        <Sidebar
+          symbols={symbols}
+          activeSymbol={symbol}
+          activeSymbolPrice={lastClose}
+          activeStructureCount={activeStructureCount}
+          newSymbol={newSymbol}
+          onNewSymbolChange={setNewSymbol}
+          onSelect={setSymbol}
+          onAddSymbol={handleAddSymbol}
+        />
 
-        <div className="flex items-center gap-1">
-          <input
-            value={newSymbol}
-            onChange={(e) => setNewSymbol(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddSymbol()}
-            placeholder="Add symbol"
-            className="w-28 rounded border border-border bg-panel-alt px-2 py-1 text-sm text-foreground placeholder:text-text-faint"
-          />
-          <button
-            onClick={handleAddSymbol}
-            className="rounded border border-border px-2 py-1 text-sm text-text-dim hover:text-accent"
-          >
-            Add
-          </button>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-text-dim ml-auto">
-          <label className="flex items-center gap-1">
-            Strategy
-            <select
-              value={strategy}
-              onChange={(e) => setStrategy(e.target.value as Strategy)}
-              className="rounded border border-border bg-panel-alt px-1 py-0.5 text-foreground"
+        <div className="main">
+          {error && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "8px 12px",
+                border: "1px solid var(--hairline)",
+                borderRadius: 4,
+                color: "var(--sell)",
+                fontSize: 12,
+              }}
             >
-              {STRATEGIES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
+              {error}
+            </div>
+          )}
 
-          <label className="flex items-center gap-1">
-            Swing
-            <input
-              type="number"
-              min={1}
-              value={swingLookback}
-              onChange={(e) => setSwingLookback(Number(e.target.value) || 1)}
-              className="w-14 rounded border border-border bg-panel-alt px-1 py-0.5 text-foreground"
-            />
-          </label>
-
-          <label className="flex items-center gap-1">
-            Touch
-            <select
-              value={touchMode}
-              onChange={(e) => setTouchMode(e.target.value as TouchMode)}
-              className="rounded border border-border bg-panel-alt px-1 py-0.5 text-foreground"
-            >
-              {TOUCH_MODES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="flex items-center gap-1">
-            E Target
-            <select
-              value={eTarget}
-              onChange={(e) => setETarget(e.target.value as ETarget)}
-              className="rounded border border-border bg-panel-alt px-1 py-0.5 text-foreground"
-            >
-              {E_TARGETS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <span
-            className={`ml-2 h-2 w-2 rounded-full ${
-              connected ? "bg-buy" : "bg-text-faint"
-            }`}
-            title={connected ? "Live" : "Not connected"}
-          />
-        </div>
-      </header>
-
-      {error && (
-        <div className="border-b border-border bg-sell/10 px-4 py-2 text-xs text-sell">
-          {error}
-        </div>
-      )}
-
-      <main className="relative flex-1">
-        {loading && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/60 text-sm text-text-dim">
-            Loading…
+          <div className="main-head">
+            <div className="pair">
+              {symbol || "No symbol selected"}
+              {symbol && strategy !== "both" && (
+                <span className="direction">
+                  {strategy === "upside" ? "Upside · Sell setup" : "Downside · Buy setup"}
+                </span>
+              )}
+            </div>
+            {lastClose !== null && (
+              <div className="price mono">
+                {lastClose.toFixed(4)}
+                {delta !== null && (
+                  <span className={`delta ${delta >= 0 ? "up" : "down"}`}>
+                    {delta >= 0 ? "+" : ""}
+                    {delta.toFixed(4)}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-        )}
-        {symbol ? (
-          <StructureChart candles={candles} structures={structures} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-text-dim">
-            Add a symbol to begin
+
+          <div className="tf-row">
+            <div className="strategy-row">
+              <div className="strategy-category">
+                <span className="strategy-cat-label">Strategy</span>
+              </div>
+              <div className="strategy-group">
+                <button
+                  className={`strategy-btn up ${strategy === "upside" ? "active" : ""}`}
+                  onClick={() => setStrategy("upside")}
+                >
+                  <span className="swatch" />
+                  Upside · Sell
+                </button>
+                <button
+                  className={`strategy-btn down ${strategy === "downside" ? "active" : ""}`}
+                  onClick={() => setStrategy("downside")}
+                >
+                  <span className="swatch" />
+                  Downside · Buy
+                </button>
+                <button
+                  className={`strategy-btn both ${strategy === "both" ? "active" : ""}`}
+                  onClick={() => setStrategy("both")}
+                >
+                  <span className="swatch" />
+                  Both
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                fontSize: 12,
+                color: "var(--text-dim)",
+              }}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                Swing
+                <input
+                  type="number"
+                  min={1}
+                  value={swingLookback}
+                  onChange={(e) => setSwingLookback(Number(e.target.value) || 1)}
+                  style={{
+                    width: 50,
+                    background: "var(--panel-alt)",
+                    border: "1px solid var(--hairline)",
+                    color: "var(--foreground)",
+                    borderRadius: 3,
+                    padding: "3px 6px",
+                  }}
+                />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                Touch
+                <select
+                  value={touchMode}
+                  onChange={(e) => setTouchMode(e.target.value as TouchMode)}
+                  style={{
+                    background: "var(--panel-alt)",
+                    border: "1px solid var(--hairline)",
+                    color: "var(--foreground)",
+                    borderRadius: 3,
+                    padding: "3px 6px",
+                  }}
+                >
+                  {TOUCH_MODES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                E Target
+                <select
+                  value={eTarget}
+                  onChange={(e) => setETarget(e.target.value as ETarget)}
+                  style={{
+                    background: "var(--panel-alt)",
+                    border: "1px solid var(--hairline)",
+                    color: "var(--foreground)",
+                    borderRadius: 3,
+                    padding: "3px 6px",
+                  }}
+                >
+                  {E_TARGETS.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </div>
-        )}
-      </main>
+
+          <div className="chart-frame" style={{ position: "relative" }}>
+            {loading && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  zIndex: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(13,17,23,0.6)",
+                  fontSize: 13,
+                  color: "var(--text-dim)",
+                }}
+              >
+                Loading…
+              </div>
+            )}
+            {symbol ? (
+              <StructureChart candles={candles} structures={structures} />
+            ) : (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 13,
+                  color: "var(--text-dim)",
+                }}
+              >
+                Add a symbol to begin
+              </div>
+            )}
+            <div className="legend">
+              <span>
+                <i style={{ background: "var(--sell-blue)" }} />
+                Cycle 0 — Upside
+              </span>
+              <span>
+                <i style={{ background: "var(--brass)", opacity: 0.5 }} />
+                Entry zone
+              </span>
+              <span>
+                <i style={{ background: "var(--text-muted)" }} />
+                Forming structure
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <SignalFeed symbol={symbol} structures={structures} connected={connected} />
+      </div>
+
+      <StatusBar
+        connected={connected}
+        symbolsCount={symbols.length}
+        activeStructuresCount={activeStructureCount}
+        lastUpdated={lastUpdated}
+      />
     </div>
   );
 }

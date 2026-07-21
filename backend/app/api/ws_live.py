@@ -30,7 +30,7 @@ router = APIRouter(tags=["live"])
 POLL_INTERVAL_SECONDS = 2
 
 
-@router.websocket("/ws/{symbol}")
+@router.websocket("/ws/{symbol:path}")
 async def stream_structures(
     websocket: WebSocket,
     symbol: str,

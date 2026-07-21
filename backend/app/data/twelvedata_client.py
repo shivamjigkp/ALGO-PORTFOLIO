@@ -18,6 +18,24 @@ from app.core.config import settings
 from app.models.schemas import Candle
 
 
+def _dedupe_and_sort(candles: list[Candle]) -> list[Candle]:
+    """
+    TwelveData occasionally returns a repeated bar with an identical
+    timestamp for continuously-traded instruments like Gold/Silver, usually
+    around the daily session rollover. Charting libraries (and our own
+    swing/structure detection, which assumes strictly increasing bar
+    indices) require unique, ascending timestamps — so we enforce that here,
+    once, at the source, rather than downstream in every consumer.
+
+    Keeps the LAST candle seen for any given timestamp (the more complete
+    one if TwelveData is correcting a partial bar), then sorts ascending.
+    """
+    by_timestamp: dict[int, Candle] = {}
+    for c in candles:
+        by_timestamp[c.timestamp] = c
+    return [by_timestamp[ts] for ts in sorted(by_timestamp)]
+
+
 class RateLimiter:
     """
     Sliding-window limiter: allows at most `max_calls` requests within any
@@ -86,7 +104,8 @@ class TwelveDataClient:
             )
 
         rows = payload.get("values", [])
-        return [Candle.from_twelvedata_row(row) for row in rows]
+        candles = [Candle.from_twelvedata_row(row) for row in rows]
+        return _dedupe_and_sort(candles)
 
     async def close(self) -> None:
         await self._client.aclose()

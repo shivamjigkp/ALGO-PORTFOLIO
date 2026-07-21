@@ -28,7 +28,7 @@ export interface Zone {
 }
 
 export interface StructureItem {
-  id: string;
+  id: number;
   direction: Direction;
   stage: string; // enum name, e.g. "AWAITING_B"
   stage_display: string; // human label, e.g. "Awaiting B" / "ABCDE"

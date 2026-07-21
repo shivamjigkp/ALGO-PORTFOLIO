@@ -25,9 +25,9 @@ class Settings:
     default_symbols: tuple = (
         "XAU/USD",   # Gold
         "XAG/USD",   # Silver
-        "EUR/USD",
-        "GBP/USD",
-        "USD/JPY",
+        "EUR/USD",   # Euro
+        "GBP/USD",   # British Pound
+       
     )
 
     # --- Candle fetch settings ---

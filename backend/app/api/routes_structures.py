@@ -11,7 +11,7 @@ from app.engine.structure_manager import build_structures_payload
 router = APIRouter(tags=["structures"])
 
 
-@router.get("/candles/{symbol}")
+@router.get("/candles/{symbol:path}")
 async def get_candles(symbol: str):
     candles = await candle_cache.get_candles(symbol)
     updated = await candle_cache.last_updated(symbol)
@@ -23,7 +23,7 @@ async def get_candles(symbol: str):
     }
 
 
-@router.get("/structures/{symbol}")
+@router.get("/structures/{symbol:path}")
 async def get_structures(
     symbol: str,
     strategy: str = "both",       # "upside" | "downside" | "both"

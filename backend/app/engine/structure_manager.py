@@ -81,7 +81,7 @@ def to_dict(s: Structure) -> dict:
         return None if p is None else {"index": p.index, "price": p.price}
 
     return {
-        "id": s.id,
+        "id": f"{s.direction}-{s.a.index}" if s.a is not None else f"{s.direction}-{s.id}",
         "direction": s.direction,
         "stage": s.stage.name,
         "stage_display": s.stage_name(),
