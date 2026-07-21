@@ -1,3 +1,5 @@
+server link https://algo-portfolio-lilac.vercel.app/
+
 # ABCDE Reversal Structure — Pine Script v5 Indicator Suite
 
 A pure price-action liquidity-sweep reversal detector for TradingView, built entirely on swing-point structure — no oscillators, no moving averages, no external indicators. It identifies a 5-point **A–B–C–D–E** liquidity sweep pattern that precedes trend reversals, and plots a defined entry zone once the pattern completes.
